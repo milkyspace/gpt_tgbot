@@ -104,12 +104,64 @@ async def pay_handler(message: Message, bot: Bot, db: Database):
     )
 
 
+@router.callback_query(F.data == "pay")
+async def pay_callback(callback: CallbackQuery, bot: Bot, db: Database, redis: Redis):  # Добавляем redis
+    await send_invoice(
+        bot=bot,
+        chat_id=callback.message.chat.id,
+        user_id=callback.from_user.id,
+        full_name=callback.from_user.full_name,
+        user_name=callback.from_user.username,
+        redis=redis  # Добавляем redis
+    )
+    await callback.answer()
+
+
+@router.message(Command("pay"))
+async def pay_handler(message: Message, bot: Bot, db: Database, redis: Redis):  # Добавляем redis
+    user_id = message.from_user.id
+
+    if await db.is_subscription_active(user_id):
+        sub_expiration_date = await db.get_sub_expiration_date(
+            telegram_id=user_id, user_tz="Europe/Moscow"
+        )
+        formatted_date = sub_expiration_date.strftime("%Y-%m-%d %H:%M:%S")
+
+        text = "\n".join([
+            "✅ *Вы уже подписаны\\!*\n",
+            f"📅 *Окончание текущей подписки:* `{formatted_date} (МСК)`",
+            "",
+            "🔄 *Вы можете продлить подписку, выбрав срок ниже:*",
+        ])
+
+        await message.answer(
+            text=text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=get_payment_keyboard()
+        )
+        return
+
+    await send_invoice(
+        bot=bot,
+        chat_id=message.chat.id,
+        user_id=message.from_user.id,
+        full_name=message.from_user.full_name,
+        user_name=message.from_user.username,
+        redis=redis  # Добавляем redis
+    )
+
+
 async def send_invoice(bot: Bot, chat_id: int, user_id: int, full_name: str,
-                       user_name: str, months: int, price: int):
+                       user_name: str, redis: Redis):  # Добавляем параметр redis
+    # Получаем информацию о выбранных месяцах (здесь нужно добавить логику выбора)
+    # Для примера будем использовать 1 месяц
+    months = 1
+    price = SUBSCRIPTION_PRICES.get(months, 0)
+
     description = f"Оплата подписки на {months} месяц(ев)"
 
-    # Сохраняем информацию о выборе пользователя
-    await bot.get_redis().setex(
+    # Сохраняем информацию о выборе пользователя используя переданный redis
+    await redis.setex(
         f"payment_info:{user_id}",
         300,
         json.dumps({"months": months, "price": price})
