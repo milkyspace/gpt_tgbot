@@ -64,7 +64,7 @@ async def global_error_handler(event: ErrorEvent, bot: Bot, redis: Redis, db: Da
         if telegram_id:
             await bot.send_message(
                 chat_id=telegram_id,
-                text=f"Произошла непредвиденная ошибка \nСвяжитесь с разработчиком (https://t.me/yurchestChatGPT_Help)\n\nError: {exception}"
+                text=f"Произошла непредвиденная ошибка \nСвяжитесь с разработчиком\n\nError: {exception}"
             )
     except Exception as e:
         logger.error(f"Error sending error message to user {telegram_id}: {e}")
