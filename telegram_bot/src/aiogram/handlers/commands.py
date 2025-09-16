@@ -86,7 +86,7 @@ async def show_dialog_handler(message: Message):
 @router.message(Command('help'))
 async def reset_handler(message: Message, openai: OpenAI_API):
     text = "\n".join([
-        "🤖 *Этот чат\\-бот взаимодействует с OpenAI API*\n",
+        "🤖 *Чат\\-GPT*\n",
         f"Используемая модель: `{openai.model_id}`\n",
         "Поддерживаемые форматы запросов:",
         "\\- Генерация текста",
