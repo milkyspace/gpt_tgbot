@@ -1,3 +1,4 @@
+# database/postgreSQL.py
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, BigInteger, func, text, DateTime
@@ -6,16 +7,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import update
 
 from src.logger import logger
-
-from src.config import SUBSCRIPTION_DURATION_MONTHS, TRIAL_PERIOD_NUM_REQ
-
+from src.config import TRIAL_PERIOD_NUM_REQ
 from dateutil.relativedelta import relativedelta
 from datetime import datetime
 import pytz
 
 SRV_TZ = pytz.timezone("Europe/Moscow")
 
+
 class Base(DeclarativeBase): pass
+
 
 def handle_db_errors(func):
     async def wrapper(*args, **kwargs):
@@ -24,7 +25,9 @@ def handle_db_errors(func):
         except Exception as e:
             logger.error(f"(POSTGRE)\t Error in {func.__name__}: {e}")
             return None
+
     return wrapper
+
 
 class User(Base):
     __tablename__ = 'users'
@@ -38,7 +41,8 @@ class User(Base):
     num_input_tokens = Column(BigInteger, default=0)
     num_output_tokens = Column(BigInteger, default=0)
     sub_expiration_date = Column(DateTime(timezone=True), nullable=True)
-    last_req_date = Column(DateTime(timezone=True), nullable=True)  
+    last_req_date = Column(DateTime(timezone=True), nullable=True)
+
 
 class Payment(Base):
     __tablename__ = 'payments'
@@ -54,8 +58,10 @@ class Payment(Base):
     invoice_payload = Column(String, nullable=False)
     is_recurring = Column(String)
     subscription_expiration_date = Column(DateTime(timezone=True))
-    is_first_recurring=Column(String)
-    order_info=Column(String)
+    is_first_recurring = Column(String)
+    order_info = Column(String)
+    months = Column(Integer, nullable=False)  # Добавляем поле для хранения количества месяцев
+
 
 class Error(Base):
     __tablename__ = 'errors'
@@ -69,10 +75,11 @@ class Error(Base):
     traceback = Column(String())
     is_resolved = Column(Boolean, default=False)
 
+
 class Database:
     def __init__(self, db_url: str):
         try:
-            self.engine = create_async_engine(db_url) # echo=True
+            self.engine = create_async_engine(db_url)  # echo=True
             self.SessionLocal = sessionmaker(
                 bind=self.engine, class_=AsyncSession, expire_on_commit=False
             )
@@ -81,7 +88,6 @@ class Database:
             logger.critical(f"(POSTGRE)\t Error while initializing database engine: {e}")
             self.close()
             raise
-
 
     async def create_tables_if_not_exist(self):
         """Установить соединение с базой данных и создать таблицы."""
@@ -93,7 +99,6 @@ class Database:
             logger.critical(f"(POSTGRE)\t Error while connecting to POSTGRE: {e}")
             await self.close()
             raise
-            
 
     async def close(self):
         """Закрыть соединение с базой данных."""
@@ -103,7 +108,6 @@ class Database:
                 logger.info("(POSTGRE)\t POSTGRE connection closed")
         except Exception as e:
             logger.error(f"(POSTGRE)\t Error closing the POSTGRE connection: {e}")
-
 
     @handle_db_errors
     async def add_user(self, telegram_id: int, first_name: str, username: str, language_code: str):
@@ -128,7 +132,7 @@ class Database:
                 {"telegram_id": telegram_id},
             )
             return result.scalar()
-    
+
     @handle_db_errors
     async def increment_user_requests(self, telegram_id: int):
         """Увеличить счетчик запросов пользователя."""
@@ -155,17 +159,18 @@ class Database:
                 user = await session.get(User, telegram_id)
                 user.num_output_tokens += tokens
                 logger.debug(f"(POSTGRE)\t User {telegram_id} output tokens ({tokens}) added")
-    
+
     @handle_db_errors
-    async def add_user_in_out_tokens(self, telegram_id: int, in_tokens: int, out_tokens:int):
+    async def add_user_in_out_tokens(self, telegram_id: int, in_tokens: int, out_tokens: int):
         """Добавить входные и выходные токены пользователю."""
         async with self.SessionLocal() as session:
             async with session.begin():
                 user = await session.get(User, telegram_id)
                 user.num_input_tokens += in_tokens
                 user.num_output_tokens += out_tokens
-                logger.debug(f"(POSTGRE)\t User {telegram_id} input tokens ({in_tokens}) and output tokens ({out_tokens}) added")
-    
+                logger.debug(
+                    f"(POSTGRE)\t User {telegram_id} input tokens ({in_tokens}) and output tokens ({out_tokens}) added")
+
     @handle_db_errors
     async def update_last_req_date(self, telegram_id: int):
         """Обновляет last_req_date для пользователя с указанным telegram_id."""
@@ -175,7 +180,6 @@ class Database:
                     update(User)
                     .where(User.telegram_id == telegram_id)
                     .values(last_req_date=datetime.now())
-                    # .values(last_req_date=datetime.now(tz=SRV_TZ))
                 )
                 await session.execute(stmt)
                 logger.debug("(POSTGRE)\t Updated last_req_date for user_id: %s", telegram_id)
@@ -186,7 +190,7 @@ class Database:
         async with self.SessionLocal() as session:
             user = await session.get(User, telegram_id)
             return user.num_requests
-        
+
     @handle_db_errors
     async def is_user_trial(self, telegram_id: int) -> bool:
         """
@@ -212,7 +216,7 @@ class Database:
                 {"telegram_id": telegram_id},
             )
             return result.scalar() or False
-    
+
     @handle_db_errors
     async def update_sub_expiration_date(self, telegram_id: int, date: DateTime):
         """Обновить дату окончания подписки пользователя."""
@@ -229,17 +233,34 @@ class Database:
             user = await session.get(User, telegram_id)
             if user is None or user.sub_expiration_date is None:
                 return None
-            
+
             # Преобразуем в локальное время пользователя
             local_tz = pytz.timezone(user_tz)
             return user.sub_expiration_date.astimezone(local_tz)
 
+    @handle_db_errors
+    async def add_subscription(self, telegram_id: int, months: int) -> datetime:
+        """Добавить подписку пользователю на указанное количество месяцев."""
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                user = await session.get(User, telegram_id)
+                now = datetime.now(pytz.UTC)
+
+                if user.sub_expiration_date is None or user.sub_expiration_date < now:
+                    # Если подписка неактивна или отсутствует, устанавливаем от текущей даты
+                    user.sub_expiration_date = now + relativedelta(months=months)
+                else:
+                    # Если подписка активна, добавляем месяцы к текущей дате окончания
+                    user.sub_expiration_date += relativedelta(months=months)
+
+                logger.debug(f"(POSTGRE)\t Added {months} months subscription for user {telegram_id}")
+                return user.sub_expiration_date
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Errors
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     @handle_db_errors
-    async def add_error(self, 
+    async def add_error(self,
                         error_type: str,
                         error_text: str,
                         file_path: str,
@@ -250,10 +271,10 @@ class Database:
         async with self.SessionLocal() as session:
             async with session.begin():
                 error = Error(
-                    type = error_type,
-                    text = error_text,
-                    file_path = file_path,
-                    telegram_id = telegram_id,
+                    type=error_type,
+                    text=error_text,
+                    file_path=file_path,
+                    telegram_id=telegram_id,
                     traceback=traceback
                 )
                 session.add(error)
@@ -263,17 +284,18 @@ class Database:
     # Payments
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     @handle_db_errors
-    async def add_payment(self, telegram_id: int, 
-                          telegram_username: str, 
-                          currency: str, 
-                          total_amount: int, 
-                          telegram_payment_charge_id: str, 
-                          provider_payment_charge_id: str, 
-                          invoice_payload: str, 
-                          is_recurring: str, 
-                          subscription_expiration_date: DateTime, 
-                          is_first_recurring: str, 
-                          order_info: str):
+    async def add_payment(self, telegram_id: int,
+                          telegram_username: str,
+                          currency: str,
+                          total_amount: int,
+                          telegram_payment_charge_id: str,
+                          provider_payment_charge_id: str,
+                          invoice_payload: str,
+                          is_recurring: str,
+                          subscription_expiration_date: DateTime,
+                          is_first_recurring: str,
+                          order_info: str,
+                          months: int):  # Добавляем параметр months
         """
         Добавить платеж в таблицу payments.
         Обновить sub_expiration_date в users 
@@ -291,17 +313,21 @@ class Database:
                     is_recurring=is_recurring,
                     subscription_expiration_date=subscription_expiration_date,
                     is_first_recurring=is_first_recurring,
-                    order_info=order_info
+                    order_info=order_info,
+                    months=months  # Сохраняем количество месяцев
                 )
                 session.add(payment)
                 logger.debug(f"(POSTGRE)\t Payment {provider_payment_charge_id} added for user: {telegram_username}")
 
-                # Обновить sub_expiration_date (payment.create_date + SUBSCRIPTION_DURATION_MONTHS) в users
+                # Обновляем подписку пользователя
                 user = await session.get(User, telegram_id)
-                if user.sub_expiration_date is None or not await self.is_subscription_active(telegram_id):
-                    user.sub_expiration_date = payment.create_date + relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
-                else:
-                    user.sub_expiration_date += relativedelta(months=SUBSCRIPTION_DURATION_MONTHS)
-                logger.debug(f"(POSTGRE)\t Updated subscription expiration date for user {telegram_id}")
-                
+                now = datetime.now(pytz.UTC)
 
+                if user.sub_expiration_date is None or user.sub_expiration_date < now:
+                    # Если подписка неактивна или отсутствует, устанавливаем от текущей даты
+                    user.sub_expiration_date = now + relativedelta(months=months)
+                else:
+                    # Если подписка активна, добавляем месяцы к текущей дате окончания
+                    user.sub_expiration_date += relativedelta(months=months)
+
+                logger.debug(f"(POSTGRE)\t Updated subscription expiration date for user {telegram_id}")

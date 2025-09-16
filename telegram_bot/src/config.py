@@ -59,7 +59,17 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
 TRIAL_PERIOD_NUM_REQ = int(os.getenv("TRIAL_PERIOD_NUM_REQ"))
 SUBSCRIPTION_DURATION_MONTHS = int(os.getenv("SUBSCRIPTION_DURATION_MONTHS")) # IN MOTHS
-SUBSCRIPTION_PRICE_RUB = int(os.getenv("SUBSCRIPTION_PRICE_RUB"))
+
+# Цены для подписки на разные сроки (в рублях)
+SUBSCRIPTION_PRICES = {
+    1: 299,
+    3: 799,  # ~266 руб/мес
+    6: 1499,  # ~250 руб/мес
+    12: 2699  # ~225 руб/мес
+}
+# Доступные варианты продолжительности подписки
+SUBSCRIPTION_DURATION_OPTIONS = [1, 3, 6, 12]
+
 EMAIL_FOR_BILL=os.getenv("EMAIL_FOR_BILL")
 
 MAX_HISTORY_LENGTH_TRIAL = int(os.getenv("MAX_HISTORY_LENGTH_TRIAL"))

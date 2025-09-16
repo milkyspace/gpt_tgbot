@@ -13,3 +13,4 @@ pytz==2024.2
 prometheus_client==0.21.1
 telegramify-markdown==0.4.1
 telegramify-markdown[mermaid]==0.4.1
+emoji==2.2.0
